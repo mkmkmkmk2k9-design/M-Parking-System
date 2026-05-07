@@ -12,13 +12,21 @@ import java.io.File; // Thư viện dùng để làm việc với file và thư 
 public class Admin extends JFrame {
     private static final long serialVersionUID = 1L;
     private boolean isSystemAction = false;
-
     public Admin() {
+    	new Thread(() -> {
+            try {
+                DBConnection.getConnection(); 
+                System.out.println("--- Database đã sẵn sàng phục vụ ---");
+            } catch (Exception e) {
+                System.err.println("Lỗi kết nối sớm: " + e.getMessage());
+            }
+        }).start();
+    	
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setExtendedState(JFrame.MAXIMIZED_BOTH);
         setTitle("Hệ thống quản lý bãi giữ xe");
 
-        JLabel background = new JLabel(new ImageIcon("C:/Dự án/login_bg.jpg"));
+        JLabel background = new JLabel(new ImageIcon("img/login_bg.jpg"));
         background.setLayout(new GridBagLayout());
         setContentPane(background);
 
@@ -45,7 +53,7 @@ public class Admin extends JFrame {
         b.gridx = 0; b.gridy = 0; b.gridwidth = 2;
         p.add(title, b);
    
-        ImageIcon uicon = new ImageIcon(new ImageIcon("C:/Dự án/user-interface.png").getImage().getScaledInstance(30, 30, Image.SCALE_SMOOTH));
+        ImageIcon uicon = new ImageIcon(new ImageIcon("img/user-interface.png").getImage().getScaledInstance(30, 30, Image.SCALE_SMOOTH));
         JLabel juser = new JLabel(uicon);
         JTextField user = new JTextField(15);
         user.setFont(new Font("Arial", Font.PLAIN, 15));
@@ -53,7 +61,7 @@ public class Admin extends JFrame {
         b.gridx = 0; b.gridy = 1; b.gridwidth = 1; p.add(juser, b);
         b.gridx = 1; p.add(user, b);
  
-        ImageIcon picon = new ImageIcon(new ImageIcon("C:/Dự án/pass.png").getImage().getScaledInstance(30, 30, Image.SCALE_SMOOTH));
+        ImageIcon picon = new ImageIcon(new ImageIcon("img/pass.png").getImage().getScaledInstance(30, 30, Image.SCALE_SMOOTH));
         JLabel jpass = new JLabel(picon);
         JPasswordField pass = new JPasswordField(15);
         pass.setFont(new Font("Arial", Font.PLAIN, 15));
@@ -96,7 +104,7 @@ public class Admin extends JFrame {
         login.setFocusPainted(false);
         login.setCursor(new Cursor(Cursor.HAND_CURSOR));
 
-        ImageIcon eicon = new ImageIcon(new ImageIcon("C:/Dự án/exit.png").getImage().getScaledInstance(25, 25, Image.SCALE_SMOOTH));
+        ImageIcon eicon = new ImageIcon(new ImageIcon("img/exit.png").getImage().getScaledInstance(25, 25, Image.SCALE_SMOOTH));
         JButton ex = new JButton(eicon);
         ex.setFocusPainted(false);
         ex.setBorderPainted(false);
@@ -117,24 +125,31 @@ public class Admin extends JFrame {
             String us = user.getText().trim();
             String pa = new String(pass.getPassword()).trim();
             String currentStoredPass = "123";
-            File filePass = new File("C:/Dự án/admin_pass.txt");        
+            File filePass = new File("img/admin_pass.txt");        
+            
             if (filePass.exists()) {
                 try (BufferedReader br = new BufferedReader(new FileReader(filePass))) {
-                    currentStoredPass = br.readLine();
-                } catch (IOException ioex) {
-                    ioex.printStackTrace();
-                }
+                    String line = br.readLine();
+                    if (line != null) currentStoredPass = line.trim(); 
+                } catch (IOException ioex) { ioex.printStackTrace(); }
             }
+
             if (us.isEmpty() || pa.isEmpty()) {
-                lblError.setText("Vui lòng nhập tên đăng nhập và mật khẩu");
+                lblError.setText("Vui lòng nhập đầy đủ thông tin");
             } else if (!us.equals("admin") || !pa.equals(currentStoredPass)) { 
                 lblError.setText("Sai tên đăng nhập hoặc mật khẩu");
                 pass.setText("");
                 pass.requestFocusInWindow();
             } else {
-                lblError.setText(" "); 
-                dispose();
-                new ParkForm().setVisible(true);
+                lblError.setText("Đang kết nối cơ sở dữ liệu, vui lòng đợi...");
+                login.setEnabled(false);
+                new Thread(() -> {
+                    ParkForm pf = new ParkForm();                            
+                    SwingUtilities.invokeLater(() -> {
+                        dispose(); 
+                        pf.setVisible(true);
+                    });
+                }).start();
             }
         });
 
