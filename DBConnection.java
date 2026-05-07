@@ -1,18 +1,49 @@
-import java.sql.Connection; // Thư viện đại diện cho kết nối giữa ứng dụng Java và cơ sở dữ liệu.
-import java.sql.DriverManager; // Thư viện dùng để lấy kết nối tới cơ sở dữ liệu thông qua JDBC driver.
+import java.sql.*;
+import java.util.Properties;
+import java.io.FileInputStream;
+import java.io.IOException;
 
 public class DBConnection {
-	public static Connection getConnection() {
-		try {
-			  String url = "jdbc:sqlserver://LAPTOP-0UIQI6MQ:1433;"
-					     + "databaseName=DA;"
-					     + "encrypt=true;"
-					     + "trustServerCertificate=true;";
-			  String user = "admin";
-			  String pass = "123";
-		return DriverManager.getConnection(url, user, pass);
-		} catch (Exception e) {
-			e.printStackTrace();
-		} return null;
-	}
+    private static Connection conn = null;
+    private static String url;
+    private static String user;
+    private static String pass;
+
+    static {
+        Properties props = new Properties();
+        try (FileInputStream fis = new FileInputStream("config.properties")) {
+            props.load(fis);
+            url = props.getProperty("db.url");
+            user = props.getProperty("db.user");
+            pass = props.getProperty("db.password");
+            Class.forName("com.mysql.cj.jdbc.Driver");
+        } catch (IOException | ClassNotFoundException e) {
+            System.err.println("❌ Lỗi cấu hình Database: " + e.getMessage());
+        }
+    }
+
+    public static synchronized Connection getConnection() {
+        try {
+            if (conn != null && !conn.isClosed() && conn.isValid(2)) {
+                return conn;
+            }
+            if (url != null) {
+                conn = DriverManager.getConnection(url, user, pass);
+            }
+        } catch (SQLException e) {
+            System.err.println("❌ Lỗi kết nối MySQL: " + e.getMessage());
+        }
+        return conn;
+    }
+
+    public static synchronized void closeConnection() {
+        try {
+            if (conn != null && !conn.isClosed()) {
+                conn.close();
+                conn = null;
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
 }
