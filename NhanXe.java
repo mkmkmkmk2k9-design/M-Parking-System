@@ -1,36 +1,31 @@
 import javax.swing.*;
-import javax.swing.border.EmptyBorder; // Thư viện tạo khoảng trống xung quanh component, không vẽ viền.
-import javax.swing.border.LineBorder; // Thư viện tạo viền đường thẳng bao quanh component.
-import javax.swing.text.*; // Thư viện Làm việc với văn bản nâng cao trong JTextField / JTextArea:
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.LineBorder;
+import javax.swing.text.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.sql.*;
 
 public class NhanXe extends JPanel {
     private static final long serialVersionUID = 1L;
-
     private JTabbedPane tabbedPane;
     private JLabel lblSoLuongXe;
-
+    private boolean isLoading = false;
     private final Color COLOR_TRONG = new Color(235, 51, 36);
     private final Color COLOR_CO_XE = new Color(0, 200, 100);
 
     class LimitDocumentFilter extends DocumentFilter {
         private int limit;
         public LimitDocumentFilter(int limit) { this.limit = limit; }
-
         @Override
-        public void insertString(FilterBypass fb, int offset, String string, AttributeSet attr)
-                throws BadLocationException {
+        public void insertString(FilterBypass fb, int offset, String string, AttributeSet attr) throws BadLocationException {
             if (string == null) return;
             if (string.matches("\\d+") && fb.getDocument().getLength() + string.length() <= limit) {
                 super.insertString(fb, offset, string, attr);
             }
         }
-
         @Override
-        public void replace(FilterBypass fb, int offset, int length, String text, AttributeSet attrs)
-                throws BadLocationException {
+        public void replace(FilterBypass fb, int offset, int length, String text, AttributeSet attrs) throws BadLocationException {
             if (text == null) return;
             if (text.matches("\\d+") && fb.getDocument().getLength() + text.length() - length <= limit) {
                 super.replace(fb, offset, length, text, attrs);
@@ -73,27 +68,41 @@ public class NhanXe extends JPanel {
     }
 
     private void loadDataToTabs() {
+    	if (isLoading) return;
+    	isLoading = true;
         int currentTab = tabbedPane.getSelectedIndex();
-        tabbedPane.removeAll();
+        new Thread(() -> {
+            try {
+                int soLuong = getSoLuongXeDangGui();
+                JPanel panelA = createGridPanel("A");
+                JPanel panelB = createGridPanel("B");
+                JPanel panelC = createGridPanel("C");
 
-        tabbedPane.addTab("KHU VỰC A", createGridPanel("A"));
-        tabbedPane.addTab("KHU VỰC B", createGridPanel("B"));
-        tabbedPane.addTab("KHU VỰC C", createGridPanel("C"));
-
-        if (currentTab != -1) tabbedPane.setSelectedIndex(currentTab);
-
-        lblSoLuongXe.setText("Số xe trong bãi: " + getSoLuongXeDangGui() + " / 60");
+                SwingUtilities.invokeLater(() -> {
+                    tabbedPane.removeAll();
+                    tabbedPane.addTab("KHU VỰC A", panelA);
+                    tabbedPane.addTab("KHU VỰC B", panelB);
+                    tabbedPane.addTab("KHU VỰC C", panelC);
+                    if (currentTab != -1 && currentTab < tabbedPane.getTabCount()) {
+                        tabbedPane.setSelectedIndex(currentTab);
+                    }
+                    lblSoLuongXe.setText("Số xe trong bãi: " + soLuong + " / 60");
+                });
+            } catch (Exception e) { e.printStackTrace(); isLoading = false; }
+        }).start();
     }
 
     private int getSoLuongXeDangGui() {
         int count = 0;
-        try (Connection conn = DBConnection.getConnection()) {
-            String sql = "SELECT COUNT(*) FROM BaiXe WHERE TrangThai = N'Có xe'";
-            PreparedStatement ps = conn.prepareStatement(sql);
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) count = rs.getInt(1);
-        } catch (SQLException e) {
-            e.printStackTrace();
+        synchronized (DBConnection.class) {
+            try {
+                Connection conn = DBConnection.getConnection(); 
+                String sql = "SELECT COUNT(*) FROM BaiXe WHERE TrangThai = 'Có xe'";
+                try (PreparedStatement ps = conn.prepareStatement(sql);
+                     ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) count = rs.getInt(1);
+                }
+            } catch (SQLException e) { e.printStackTrace(); }
         }
         return count;
     }
@@ -104,23 +113,26 @@ public class NhanXe extends JPanel {
         grid.setBorder(new EmptyBorder(20, 20, 20, 20));
         grid.setBackground(new Color(240, 240, 240));
 
-        try (Connection conn = DBConnection.getConnection()) {
-            String sql = "SELECT * FROM BaiXe WHERE KhuVuc = ? " +
-                    "ORDER BY CAST(SUBSTRING(ViTriID, 2, LEN(ViTriID)) AS INT)";
-            PreparedStatement ps = conn.prepareStatement(sql);
-            ps.setString(1, khuVuc);
-            ResultSet rs = ps.executeQuery();
-
-            while (rs.next()) {
-                grid.add(buildSlotUI(
-                        rs.getString("ViTriID"),
-                        rs.getString("TrangThai"),
-                        rs.getString("BienSo")));
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
+        java.util.List<String[]> dataList = new java.util.ArrayList<>();
+        synchronized (DBConnection.class) {
+            try {
+                Connection conn = DBConnection.getConnection();
+                String sql = "SELECT ViTriID, TrangThai, BienSo FROM BaiXe WHERE KhuVuc = ? " +
+                             "ORDER BY CAST(SUBSTRING(ViTriID, 2) AS SIGNED) ASC";
+                try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    ps.setString(1, khuVuc);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            dataList.add(new String[]{ rs.getString("ViTriID"), rs.getString("TrangThai"), rs.getString("BienSo") });
+                        }
+                    }
+                }
+            } catch (SQLException e) { System.err.println("Lỗi tại khu vực " + khuVuc + ": " + e.getMessage()); }
         }
 
+        for (String[] row : dataList) {
+            grid.add(buildSlotUI(row[0], row[1], row[2]));
+        }
         panel.add(new JScrollPane(grid), BorderLayout.CENTER);
         return panel;
     }
@@ -128,7 +140,6 @@ public class NhanXe extends JPanel {
     private JPanel buildSlotUI(String id, String status, String plate) {
         boolean isOccupied = "Có xe".equals(status);
         Color themeColor = isOccupied ? COLOR_CO_XE : COLOR_TRONG;
-
         JPanel slot = new JPanel(new BorderLayout());
         slot.setPreferredSize(new Dimension(120, 100));
         slot.setBackground(Color.WHITE);
@@ -139,20 +150,15 @@ public class NhanXe extends JPanel {
         lblID.setFont(new Font("Segoe UI", Font.BOLD, 18));
         lblID.setForeground(themeColor);
 
-        JLabel lblPlate = new JLabel(
-                isOccupied ? (plate == null || plate.isEmpty() ? "XE ĐẠP" : plate) : "TRỐNG",
-                JLabel.CENTER);
+        JLabel lblPlate = new JLabel(isOccupied ? (plate == null || plate.isEmpty() ? "XE ĐẠP" : plate) : "TRỐNG", JLabel.CENTER);
         lblPlate.setFont(new Font("Segoe UI", Font.PLAIN, 11));
 
         slot.add(lblID, BorderLayout.CENTER);
         slot.add(lblPlate, BorderLayout.SOUTH);
-
         slot.addMouseListener(new MouseAdapter() {
             public void mouseClicked(MouseEvent e) {
-                if (isOccupied)
-                    JOptionPane.showMessageDialog(null, "Vị trí " + id + " đã có xe!");
-                else
-                    nhanXeAction(id);
+                if (isOccupied) JOptionPane.showMessageDialog(null, "Vị trí " + id + " đã có xe!");
+                else nhanXeAction(id);
             }
         });
         return slot;
@@ -162,9 +168,7 @@ public class NhanXe extends JPanel {
         JTextField txtHoTen = new JTextField();
         JTextField txtSDT = new JTextField();
         JTextField txtBienSo = new JTextField();
-
         ((AbstractDocument) txtSDT.getDocument()).setDocumentFilter(new LimitDocumentFilter(10));
-
         JComboBox<String> cbLoaiXe = new JComboBox<>(new String[]{"Xe máy", "Ô tô", "Xe đạp"});
         cbLoaiXe.addActionListener(e -> {
             boolean bike = cbLoaiXe.getSelectedItem().equals("Xe đạp");
@@ -178,24 +182,23 @@ public class NhanXe extends JPanel {
         p.add(new JLabel("Loại xe:")); p.add(cbLoaiXe);
         p.add(new JLabel("Biển số:")); p.add(txtBienSo);
 
-        if (JOptionPane.showConfirmDialog(this, p, "NHẬN XE - " + id,
-                JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
-
-            try (Connection conn = DBConnection.getConnection()) {
-                String sql = "UPDATE BaiXe SET TrangThai = N'Có xe', BienSo=?, HoTenKH=?, SoDienThoai=?, LoaiXe=?, ThoiGianVao=GETDATE() WHERE ViTriID=?";
-                PreparedStatement ps = conn.prepareStatement(sql);
-                ps.setString(1, txtBienSo.getText().trim().toUpperCase());
-                ps.setString(2, txtHoTen.getText().trim());
-                ps.setString(3, txtSDT.getText().trim());
-                ps.setString(4, cbLoaiXe.getSelectedItem().toString());
-                ps.setString(5, id);
-
-                if (ps.executeUpdate() > 0) {
-                    JOptionPane.showMessageDialog(this, "Nhận xe thành công!");
-                    loadDataToTabs();
-                }
-            } catch (SQLException ex) {
-                ex.printStackTrace();
+        if (JOptionPane.showConfirmDialog(this, p, "NHẬN XE - " + id, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
+            synchronized (DBConnection.class) {
+                try {
+                    Connection conn = DBConnection.getConnection();
+                    String sql = "UPDATE BaiXe SET TrangThai = 'Có xe', BienSo=?, HoTenKH=?, SoDienThoai=?, LoaiXe=?, ThoiGianVao=NOW() WHERE ViTriID=?";
+                    try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                        ps.setString(1, txtBienSo.getText().trim().toUpperCase());
+                        ps.setString(2, txtHoTen.getText().trim());
+                        ps.setString(3, txtSDT.getText().trim());
+                        ps.setString(4, cbLoaiXe.getSelectedItem().toString());
+                        ps.setString(5, id);
+                        if (ps.executeUpdate() > 0) {
+                            JOptionPane.showMessageDialog(this, "Nhận xe thành công!");
+                            loadDataToTabs();
+                        }
+                    }
+                } catch (SQLException ex) { ex.printStackTrace(); }
             }
         }
     }
