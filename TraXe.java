@@ -1,12 +1,12 @@
 import javax.swing.*;
-import javax.swing.border.EmptyBorder; // Thư viện dùng để tạo khoảng cách cho component mà không hiển thị viền.
-import javax.swing.border.TitledBorder; // Thư viện dùng để tạo viền có tiêu đề cho JPanel hoặc component.
-import javax.swing.border.LineBorder; // Thư viện dùng để tạo viền đơn với màu và độ dày xác định.
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.TitledBorder;
+import javax.swing.border.LineBorder;
 import java.awt.*;
 import java.sql.*;
-import java.text.NumberFormat; // Thư viện dùng để định dạng số, đặc biệt là tiền tệ theo từng quốc gia.
-import java.text.SimpleDateFormat; // Thư viện dùng để chuyển ngày giờ sang chuỗi theo định dạng chỉ định.
-import java.util.Locale; // Thư viện xác định vùng quốc gia để định dạng số và tiền tệ cho đúng chuẩn.
+import java.text.NumberFormat;
+import java.text.SimpleDateFormat;
+import java.util.Locale;
 
 public class TraXe extends JPanel {
     private static final long serialVersionUID = 1L;
@@ -143,45 +143,49 @@ public class TraXe extends JPanel {
             return;
         }
 
-        try (Connection conn = DBConnection.getConnection()) {
-            String sql = "SELECT * FROM BaiXe WHERE TrangThai = N'Có xe' AND LoaiXe = ? AND (BienSo = ? OR SoDienThoai = ?)";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, loaiXeChon);
-            pstmt.setString(2, key);
-            pstmt.setString(3, key);
-            ResultSet rs = pstmt.executeQuery();
+        synchronized (DBConnection.class) { 
+            try {
+                Connection conn = DBConnection.getConnection();
+                String sql = "SELECT * FROM BaiXe WHERE TrangThai = 'Có xe' AND LoaiXe = ? AND (BienSo = ? OR SoDienThoai = ?)";
+                try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                    pstmt.setString(1, loaiXeChon);
+                    pstmt.setString(2, key);
+                    pstmt.setString(3, key);
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        if (rs.next()) {
+                            currentViTriID = rs.getString("ViTriID");
+                            String dbLoaiXe = rs.getString("LoaiXe");
+                            lblHoTen.setText("Khách hàng: " + rs.getString("HoTenKH"));
+                            lblSDT.setText("Số điện thoại: " + rs.getString("SoDienThoai"));
+                            lblLoaiXe.setText("Loại xe: " + dbLoaiXe);
+                            lblBienSo.setText("Biển số xe: " + (dbLoaiXe.equals("Xe đạp") ? "KHÔNG CÓ" : rs.getString("BienSo")));
+                            lblViTri.setText("Vị trí đỗ: " + currentViTriID);
+                            
+                            SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss");
+                            timeVaoValue = rs.getTimestamp("ThoiGianVao");
+                            Timestamp ra = new Timestamp(System.currentTimeMillis()); 
+                            
+                            lblGioVao.setText("Thời điểm vào: " + sdf.format(timeVaoValue));
+                            lblGioRa.setText("Thời điểm ra: " + sdf.format(ra)); 
 
-            if (rs.next()) {
-                currentViTriID = rs.getString("ViTriID");
-                String dbLoaiXe = rs.getString("LoaiXe");
-                lblHoTen.setText("Khách hàng: " + rs.getString("HoTenKH"));
-                lblSDT.setText("Số điện thoại: " + rs.getString("SoDienThoai"));
-                lblLoaiXe.setText("Loại xe: " + dbLoaiXe);
-                lblBienSo.setText("Biển số xe: " + (dbLoaiXe.equals("Xe đạp") ? "KHÔNG CÓ" : rs.getString("BienSo")));
-                lblViTri.setText("Vị trí đỗ: " + currentViTriID);
-                
-                SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss");
-                timeVaoValue = rs.getTimestamp("ThoiGianVao");
-                Timestamp ra = new Timestamp(System.currentTimeMillis()); 
-                
-                lblGioVao.setText("Thời điểm vào: " + sdf.format(timeVaoValue));
-                lblGioRa.setText("Thời điểm ra: " + sdf.format(ra)); 
-
-                long diffMillis = ra.getTime() - timeVaoValue.getTime();
-                long diffMinutes = diffMillis / (1000 * 60);
-                lastPrice = calculatePrice(dbLoaiXe, diffMinutes);
-                
-                lblTongTien.setText("TỔNG TIỀN: " + NumberFormat.getCurrencyInstance(Locale.of("vi", "VN")).format(lastPrice));
-                btnConfirm.setEnabled(true);
-            } else {
-                JOptionPane.showMessageDialog(this, "Không tìm thấy dữ liệu phù hợp!");
-                clearInfo();
-            }
-        } catch (SQLException ex) { ex.printStackTrace(); }
+                            long diffMillis = ra.getTime() - timeVaoValue.getTime();
+                            long diffMinutes = diffMillis / (1000 * 60);
+                            lastPrice = calculatePrice(dbLoaiXe, diffMinutes);
+                            
+                            lblTongTien.setText("TỔNG TIỀN: " + NumberFormat.getCurrencyInstance(Locale.of("vi", "VN")).format(lastPrice));
+                            btnConfirm.setEnabled(true);
+                        } else {
+                            JOptionPane.showMessageDialog(this, "Không tìm thấy xe đang gửi khớp với thông tin trên!");
+                            clearInfo();
+                        }
+                    }
+                }
+            } catch (SQLException ex) { ex.printStackTrace(); }
+        }
     }
 
     private long calculatePrice(String loaiXe, long totalMinutes) {
-        if (totalMinutes < 15) return 0; 
+        if (totalMinutes < 1) return 0; 
         long hours = (long) Math.ceil(totalMinutes / 60.0);
         if (loaiXe.equals("Xe đạp")) return 3000; 
         if (loaiXe.equals("Xe máy")) return 5000 * hours;
@@ -192,33 +196,41 @@ public class TraXe extends JPanel {
     private void processTraXe() {
         int confirm = JOptionPane.showConfirmDialog(this, "Xác nhận thanh toán và trả xe?", "Xác nhận", JOptionPane.YES_NO_OPTION);
         if (confirm == JOptionPane.YES_OPTION) {
-            try (Connection conn = DBConnection.getConnection()) {
-                conn.setAutoCommit(false); 
-                try {                  
-                    String sqlLichSu = "INSERT INTO LichSu (ViTriID, KhuVuc, TrangThai, BienSo, HoTenKH, SoDienThoai, LoaiXe, ThoiGianVao, ThoiGianRa, TongTien) " +
-                                       "SELECT ViTriID, KhuVuc, N'Đã thanh toán', BienSo, HoTenKH, SoDienThoai, LoaiXe, ThoiGianVao, GETDATE(), ? " +
-                                       "FROM BaiXe WHERE ViTriID = ?";
-                    
-                    PreparedStatement psHist = conn.prepareStatement(sqlLichSu);
-                    psHist.setLong(1, lastPrice); 
-                    psHist.setString(2, currentViTriID); 
-                    psHist.executeUpdate();
-                    String sqlUpdate = "UPDATE BaiXe SET TrangThai = N'Trống', BienSo = NULL, HoTenKH = NULL, " +
-                                       "SoDienThoai = NULL, LoaiXe = NULL, ThoiGianVao = NULL WHERE ViTriID = ?";
-                    PreparedStatement psUp = conn.prepareStatement(sqlUpdate);
-                    psUp.setString(1, currentViTriID);
-                    psUp.executeUpdate();
+            synchronized (DBConnection.class) { 
+                try {
+                    Connection conn = DBConnection.getConnection();
+                    conn.setAutoCommit(false); 
+                    try {                       
+                        String sqlLichSu = "INSERT INTO LichSu (ViTriID, KhuVuc, TrangThai, BienSo, HoTenKH, SoDienThoai, LoaiXe, ThoiGianVao, ThoiGianRa, TongTien) " +
+                                "SELECT ViTriID, KhuVuc, 'Đã thanh toán', BienSo, HoTenKH, SoDienThoai, LoaiXe, ThoiGianVao, NOW(), ? " +
+                                "FROM BaiXe WHERE ViTriID = ?";
+                        
+                        try (PreparedStatement psHist = conn.prepareStatement(sqlLichSu)) {
+                            psHist.setLong(1, lastPrice); 
+                            psHist.setString(2, currentViTriID); 
+                            psHist.executeUpdate();
+                        }
 
-                    conn.commit(); 
-                    JOptionPane.showMessageDialog(this, "Thanh toán thành công! Đã lưu vào lịch sử.");
-                    clearInfo();
-                    txtSearch.setText("");
-                } catch (SQLException ex) {
-                    conn.rollback(); 
-                    JOptionPane.showMessageDialog(this, "Lỗi SQL chi tiết: " + ex.getMessage());
-                    ex.printStackTrace();
-                }
-            } catch (SQLException ex) { ex.printStackTrace(); }
+                        String sqlUpdate = "UPDATE BaiXe SET TrangThai = 'Trống', BienSo = NULL, HoTenKH = NULL, " +
+                                "SoDienThoai = NULL, LoaiXe = NULL, ThoiGianVao = NULL WHERE ViTriID = ?";
+                        
+                        try (PreparedStatement psUp = conn.prepareStatement(sqlUpdate)) {
+                            psUp.setString(1, currentViTriID);
+                            psUp.executeUpdate();
+                        }
+
+                        conn.commit(); 
+                        JOptionPane.showMessageDialog(this, "Thanh toán thành công! Vị trí " + currentViTriID + " hiện đã trống.");
+                        clearInfo();
+                        txtSearch.setText("");
+                        conn.setAutoCommit(true); 
+                    } catch (SQLException ex) {
+                        conn.rollback(); 
+                        JOptionPane.showMessageDialog(this, "Lỗi khi xử lý thanh toán: " + ex.getMessage());
+                        ex.printStackTrace();
+                    }
+                } catch (SQLException ex) { ex.printStackTrace(); }
+            }
         }
     }
 
