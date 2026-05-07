@@ -2,9 +2,9 @@ import java.awt.*;
 import java.awt.event.*;
 import java.sql.*;
 import javax.swing.*;
-import javax.swing.border.TitledBorder; // Thư viện tạo viền có tiêu đề cho component
-import javax.swing.table.DefaultTableCellRenderer; // Thư viện tùy chỉnh cách hiển thị ô trong JTable.
-import javax.swing.table.DefaultTableModel; // Thư viện là model dữ liệu cho JTable
+import javax.swing.border.TitledBorder;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.DefaultTableModel;
 
 public class TraCuu extends JPanel {
     private static final long serialVersionUID = 1L;
@@ -137,34 +137,38 @@ public class TraCuu extends JPanel {
         String hTen = "%" + txtHoTen.getText().trim() + "%";
         String sdt = "%" + txtSDT.getText().trim() + "%";
         String kVuc = "%" + txtKhuVuc.getText().trim() + "%";
-
-        try (Connection conn = DBConnection.getConnection()) {
-            String sql = "SELECT * FROM BaiXe WHERE TrangThai NOT LIKE N'Trống' "
-                       + "AND ViTriID LIKE ? "
-                       + "AND (BienSo LIKE ? OR BienSo IS NULL) "
-                       + "AND (HoTenKH LIKE ? OR HoTenKH IS NULL) "
-                       + "AND (SoDienThoai LIKE ? OR SoDienThoai IS NULL) "
-                       + "AND KhuVuc LIKE ?";
-            
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, vID);
-            pstmt.setString(2, bSo);
-            pstmt.setString(3, hTen);
-            pstmt.setString(4, sdt);
-            pstmt.setString(5, kVuc);
-            
-            ResultSet rs = pstmt.executeQuery();
-            int count = 0;
-            while (rs.next()) {
-                count++;
-                model.addRow(new Object[]{
-                    rs.getString("ViTriID"), rs.getString("KhuVuc"), rs.getString("TrangThai"),
-                    rs.getString("BienSo"), rs.getString("HoTenKH"), rs.getString("SoDienThoai"),
-                    rs.getString("LoaiXe"), rs.getTimestamp("ThoiGianVao")
-                });
-            }
-            lblTotal.setText("Đang hiển thị: " + count + " vị trí có xe");
-        } catch (SQLException ex) { ex.printStackTrace(); }
+        synchronized (DBConnection.class) {
+            try {
+                Connection conn = DBConnection.getConnection();
+                String sql = "SELECT * FROM BaiXe WHERE TrangThai != 'Trống' "
+                           + "AND ViTriID LIKE ? "
+                           + "AND (BienSo LIKE ? OR BienSo IS NULL) "
+                           + "AND (HoTenKH LIKE ? OR HoTenKH IS NULL) "
+                           + "AND (SoDienThoai LIKE ? OR SoDienThoai IS NULL) "
+                           + "AND KhuVuc LIKE ?";
+                
+                try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                    pstmt.setString(1, vID);
+                    pstmt.setString(2, bSo);
+                    pstmt.setString(3, hTen);
+                    pstmt.setString(4, sdt);
+                    pstmt.setString(5, kVuc);
+                    
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        int count = 0;
+                        while (rs.next()) {
+                            count++;
+                            model.addRow(new Object[]{
+                                rs.getString("ViTriID"), rs.getString("KhuVuc"), rs.getString("TrangThai"),
+                                rs.getString("BienSo"), rs.getString("HoTenKH"), rs.getString("SoDienThoai"),
+                                rs.getString("LoaiXe"), rs.getTimestamp("ThoiGianVao")
+                            });
+                        }
+                        lblTotal.setText("Đang hiển thị: " + count + " vị trí có xe");
+                    }
+                }
+            } catch (SQLException ex) { ex.printStackTrace(); }
+        }
     }
 
     private void updateBaiXe() {
@@ -172,32 +176,42 @@ public class TraCuu extends JPanel {
             JOptionPane.showMessageDialog(this, "Vui lòng nhập dữ liệu để cập nhật!");
             return;
         }
-        try (Connection conn = DBConnection.getConnection()) {
-            String sql = "UPDATE BaiXe SET BienSo = ?, HoTenKH = ?, SoDienThoai = ?, TrangThai = ?, LoaiXe = ? WHERE ViTriID = ?";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setString(1, txtBienSo.getText().trim());
-            pstmt.setString(2, txtHoTen.getText().trim());
-            pstmt.setString(3, txtSDT.getText().trim());
-            pstmt.setString(4, cbTrangThaiForm.getSelectedItem().toString());
-            pstmt.setString(5, cbLoaiXe.getSelectedItem().toString());
-            pstmt.setString(6, txtViTriID.getText().trim());
-            pstmt.executeUpdate();
-            JOptionPane.showMessageDialog(this, "Cập nhật thành công!");
-            loadDataByFields();
-        } catch (SQLException ex) { ex.printStackTrace(); }
+
+        synchronized (DBConnection.class) {
+            try {
+                Connection conn = DBConnection.getConnection();
+                String sql = "UPDATE BaiXe SET BienSo = ?, HoTenKH = ?, SoDienThoai = ?, TrangThai = ?, LoaiXe = ? WHERE ViTriID = ?";
+                try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                    pstmt.setString(1, txtBienSo.getText().trim());
+                    pstmt.setString(2, txtHoTen.getText().trim());
+                    pstmt.setString(3, txtSDT.getText().trim());
+                    pstmt.setString(4, cbTrangThaiForm.getSelectedItem().toString());
+                    pstmt.setString(5, cbLoaiXe.getSelectedItem().toString());
+                    pstmt.setString(6, txtViTriID.getText().trim());
+                    pstmt.executeUpdate();
+                    JOptionPane.showMessageDialog(this, "Cập nhật thành công!");
+                    loadDataByFields();
+                }
+            } catch (SQLException ex) { ex.printStackTrace(); }
+        }
     }
 
     private void resetViTri() {
         if (txtViTriID.getText().isEmpty()) return;
         int resp = JOptionPane.showConfirmDialog(this, "Xác nhận xóa xe và giải phóng vị trí này?", "Xác nhận", JOptionPane.YES_NO_OPTION);
         if (resp == JOptionPane.YES_OPTION) {
-            try (Connection conn = DBConnection.getConnection()) {
-                String sql = "UPDATE BaiXe SET TrangThai = N'Trống', BienSo = NULL, HoTenKH = NULL, SoDienThoai = NULL, LoaiXe = NULL, ThoiGianVao = NULL WHERE ViTriID = ?";
-                PreparedStatement pstmt = conn.prepareStatement(sql);
-                pstmt.setString(1, txtViTriID.getText().trim());
-                pstmt.executeUpdate();
-                clearForm();
-            } catch (SQLException ex) { ex.printStackTrace(); }
+          
+            synchronized (DBConnection.class) {
+                try {
+                    Connection conn = DBConnection.getConnection();
+                    String sql = "UPDATE BaiXe SET TrangThai = 'Trống', BienSo = NULL, HoTenKH = NULL, SoDienThoai = NULL, LoaiXe = NULL, ThoiGianVao = NULL WHERE ViTriID = ?";
+                    try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                        pstmt.setString(1, txtViTriID.getText().trim());
+                        pstmt.executeUpdate();
+                        clearForm();
+                    }
+                } catch (SQLException ex) { ex.printStackTrace(); }
+            }
         }
     }
 
